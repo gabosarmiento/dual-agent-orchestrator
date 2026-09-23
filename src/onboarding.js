@@ -7,6 +7,7 @@ const ROLES = ['builder', 'reviewer'];
 const PROVIDERS = ['claude', 'codex', 'github'];
 const SHELLS = new Set(['bash', 'zsh', 'fish', 'sh', 'dash', 'ksh']);
 const toolFor = { builder: 'claude', reviewer: 'codex' };
+const shellQuote = value => "'" + String(value).replace(/'/g, "'\\''") + "'";
 const checkRole = role => { if (!ROLES.includes(role)) throw Error('Unknown role'); return role; };
 const checkProvider = provider => { if (!PROVIDERS.includes(provider)) throw Error('Unknown provider'); return provider; };
 
@@ -76,9 +77,9 @@ export class Onboarding {
       TERM: 'xterm-256color',
       ...env
     };
-    const args = ['new-session', '-d', '-s', name, '-c', workspace.state.repo,
-      'env', '-i', ...Object.entries(minimal).map(([key, value]) => key + '=' + value),
-      '/bin/bash', '--noprofile', '--norc', '-i'];
+    const bootstrap = ['env', '-i', ...Object.entries(minimal).map(([key, value]) => key + '=' + value),
+      '/bin/bash', '--noprofile', '--norc', '-i'].map(shellQuote).join(' ');
+    const args = ['new-session', '-d', '-s', name, '-c', workspace.state.repo, bootstrap];
     await this.tmux.command(args);
     return workspace.bind(role, name);
   }
