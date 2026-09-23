@@ -26,7 +26,8 @@ export class Onboarding {
   }
   async probe(command, args, env = {}) {
     try {
-      const { stdout } = await this.exec(command, args, { env, timeoutMs: 9000 });
+      const isolatedEnv = command === 'gh' ? { ...env, GH_TOKEN: undefined, GITHUB_TOKEN: undefined } : env;
+      const { stdout } = await this.exec(command, args, { env: isolatedEnv, timeoutMs: 9000 });
       return { ok: true, output: stdout.trim().slice(0, 220) };
     } catch { return { ok: false }; }
   }
@@ -65,6 +66,8 @@ export class Onboarding {
     const name = 'dao-' + role + '-' + Date.now().toString(36);
     const args = ['new-session', '-d', '-s', name, '-c', workspace.state.repo];
     for (const [key, value] of Object.entries(env)) args.push('-e', key + '=' + value);
+    // A pre-existing token in the parent/tmux server must never override each role's gh login.
+    args.push('-e', 'GH_TOKEN=', '-e', 'GITHUB_TOKEN=');
     await this.tmux.command(args);
     return workspace.bind(role, name);
   }
