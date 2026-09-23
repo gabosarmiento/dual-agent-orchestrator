@@ -1,6 +1,6 @@
-# Dual Agent Orchestrator — integrated onboarding prototype
+# Dual Agent Orchestrator
 
-**Phase 3 draft:** The application now guides setup of its own managed Claude, Codex and GitHub sessions directly from the web dashboard. The agents remain available in native macOS Terminal via tmux. This is an early local prototype, **not a production-ready account manager**.
+**Current main: integrated local MVP.** PRs #1, #2 and #3 have been merged. The application guides setup of managed Claude, Codex and GitHub sessions in its web dashboard. Agents remain available in native macOS Terminal via tmux. This is an early local prototype, **not a production-ready account manager**. Its automated tests and CI do not replace a real macOS authentication and workflow test.
 
 ## Start
 
@@ -9,7 +9,6 @@ Requires Node.js >=20, npm and Homebrew installed on macOS. (Homebrew is needed 
 ```sh
 git clone https://github.com/gabosarmiento/dual-agent-orchestrator.git
 cd dual-agent-orchestrator
-git switch feat/in-app-onboarding
 npm test
 npm run check
 AGENT_WORKSPACE="$HOME/Desktop" npm start
@@ -37,6 +36,6 @@ The web server is a localhost-only terminal-control interface. Do not expose it 
 
 ## Development
 
-`npm test` runs process/orchestration, tmux/workspace and setup unit tests. `npm run check` performs syntax checks. GitHub Actions is configured for this feature branch. A passing CI run establishes only the automated checks, not authenticated integration on your Mac.
+`npm test` runs process/orchestration, tmux/workspace and setup unit tests. `npm run check` performs syntax checks. GitHub Actions validates main and pull requests. A passing CI run establishes only the automated checks, not authenticated integration on your Mac.
 
 [Architecture and design limitations](docs/ARCHITECTURE.md)
