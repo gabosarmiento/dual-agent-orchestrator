@@ -4,6 +4,7 @@ import { resolve, join } from 'node:path';
 import { homedir } from 'node:os';
 import { Workspace } from './workspace.js';
 import { Onboarding } from './onboarding.js';
+import { installDependency } from './install.js';
 import { run } from './process.js';
 
 const port = Number(process.env.PORT || 4317);
@@ -66,6 +67,7 @@ createServer(async (req, res) => {
       if (!acceptedOrigins.includes(req.headers.origin) || !String(req.headers['content-type'] || '').startsWith('application/json') ||
           !acceptedOrigins.some(o => req.headers.host === new URL(o).host)) return response(res, 403, { error: 'Local same-origin JSON request required' });
       const input = await parse(req);
+      if (url.pathname === '/api/setup/install') return response(res, 200, await installDependency(input.dependency));
       if (url.pathname === '/api/setup/session') return response(res, 200, await onboarding.createSession(app, input.role));
       if (url.pathname === '/api/setup/login') return response(res, 200, await onboarding.guidedLogin(app, input.role, input.provider));
       if (url.pathname === '/api/setup/launch') return response(res, 200, await onboarding.launchAgent(app, input.role));
