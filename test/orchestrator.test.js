@@ -12,6 +12,8 @@ test('review is accepted only with one explicit verdict marker', () => {
   assert.equal(parseReview('I think PASS'), 'CHANGES_REQUIRED');
   assert.equal(parseReview('FINAL_VERDICT: PASS\nFINAL_VERDICT: CHANGES_REQUIRED'), 'CHANGES_REQUIRED');
   assert.equal(parseReview('FINAL_VERDICT: CHANGES_REQUIRED'), 'CHANGES_REQUIRED');
+  assert.equal(parseReview('FINAL_VERDICT: PASS\nActionable issue: loses data\n'), 'CHANGES_REQUIRED');
+  assert.equal(parseReview('FINAL_VERDICT: PASS\n \t'), 'PASS');
 });
 test('stage transitions are explicit', () => {
   assert.equal(nextStage('reviewing', 'PASS'), 'verified');
@@ -43,4 +45,23 @@ test('persist and load completed task snapshots', async () => {
   const restarted = new Orchestrator({ workspace: root, storage });
   await restarted.load();
   assert.equal(restarted.list()[0].stage, 'verified');
+});
+
+test('concurrent task saves retain newest complete atomic snapshot', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dual-agent-atomic-'));
+  const app = new Orchestrator({ workspace: root, storage: join(root, 'state') });
+  const task = { id: '12345678-1234-1234-1234-123456789abc', repo: root, stage: 'queued', events: [], results: [] };
+  const writes = [];
+  for (let n = 0; n < 60; n++) {
+    task.stage = 'step-' + n;
+    writes.push(app.save(task));
+  }
+  await Promise.all(writes);
+  const restored = new Orchestrator({workspace: root, storage: join(root, 'state')});
+  await restored.load();
+  assert.equal(restored.list()[0].stage, 'step-59');
+  await app.stage(task, 'verified');
+  const final = new Orchestrator({workspace: root, storage: join(root, 'state')});
+  await final.load();
+  assert.equal(final.list()[0].stage, 'verified');
 });
