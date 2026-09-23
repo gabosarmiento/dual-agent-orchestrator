@@ -1,9 +1,9 @@
 name: Validate MVP
 on:
   push:
-    branches: [main, feat/local-mvp, feat/persistent-workspace]
+    branches: [main, feat/local-mvp, feat/persistent-workspace, feat/in-app-onboarding]
   pull_request:
-    branches: [main, feat/local-mvp]
+    branches: [main, feat/local-mvp, feat/persistent-workspace]
 jobs:
   test:
     runs-on: ubuntu-latest
