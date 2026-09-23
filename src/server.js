@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { homedir } from 'node:os';
 import { Workspace } from './workspace.js';
+import { Onboarding } from './onboarding.js';
 import { run } from './process.js';
 
 const port = Number(process.env.PORT || 4317);
@@ -11,6 +12,7 @@ const workspaceRoot = resolve(process.env.AGENT_WORKSPACE || join(homedir(), 'co
 const storage = resolve(process.env.AGENT_STORAGE || join(homedir(), '.dual-agent-orchestrator'));
 const app = new Workspace({ root: workspaceRoot, storage });
 await app.load();
+const onboarding = new Onboarding({ storage, tmux: app.tmux });
 const response = (res, status, value) => {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
   res.end(JSON.stringify(value));
@@ -37,6 +39,9 @@ createServer(async (req, res) => {
       return;
     }
     if (req.method === 'GET' && url.pathname === '/api/state') return response(res, 200, { ...(await app.snapshot()), allowedWorkspace: workspaceRoot });
+    if (req.method === 'GET' && url.pathname === '/api/onboarding') {
+      return response(res, 200, { diagnostics: await onboarding.diagnostics(), identities: await onboarding.identities() });
+    }
     if (req.method === 'GET' && url.pathname === '/api/status') {
       const [tmux, claude, codex] = await Promise.all([
         app.tmux.available(), status('claude', ['--version']), status('codex', ['--version'])
@@ -61,6 +66,10 @@ createServer(async (req, res) => {
       if (!acceptedOrigins.includes(req.headers.origin) || !String(req.headers['content-type'] || '').startsWith('application/json') ||
           !acceptedOrigins.some(o => req.headers.host === new URL(o).host)) return response(res, 403, { error: 'Local same-origin JSON request required' });
       const input = await parse(req);
+      if (url.pathname === '/api/setup/session') return response(res, 200, await onboarding.createSession(app, input.role));
+      if (url.pathname === '/api/setup/login') return response(res, 200, await onboarding.guidedLogin(app, input.role, input.provider));
+      if (url.pathname === '/api/setup/launch') return response(res, 200, await onboarding.launchAgent(app, input.role));
+      if (url.pathname === '/api/setup/verify-github') return response(res, 200, await onboarding.verifyUniqueGithub());
       if (url.pathname === '/api/project') return response(res, 200, await app.project(input.repo));
       if (url.pathname === '/api/task') return response(res, 200, await app.setTask(input.prompt));
       if (url.pathname === '/api/bind') return response(res, 200, await app.bind(input.role, input.target));
