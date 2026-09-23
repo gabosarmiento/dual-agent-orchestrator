@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test test/*.test.js",
-    "check": "node --check src/server.js && node --check src/tmux.js && node --check src/workspace.js && node --check src/orchestrator.js && node --check src/git.js && node --check src/process.js"
+    "check": "node --check src/server.js && node --check src/tmux.js && node --check src/workspace.js && node --check src/orchestrator.js && node --check src/git.js && node --check src/process.js && node --check src/onboarding.js && node --check src/install.js"
   },
   "engines": {
     "node": ">=20"
