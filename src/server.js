@@ -4,6 +4,7 @@ import { resolve, join } from 'node:path';
 import { homedir } from 'node:os';
 import { Workspace } from './workspace.js';
 import { Onboarding } from './onboarding.js';
+import { allowedLocalHost } from './http-security.js';
 import { installDependency } from './install.js';
 import { run } from './process.js';
 
@@ -34,6 +35,7 @@ const status = async (command, args, env = {}) => {
 createServer(async (req, res) => {
   const url = new URL(req.url || '/', origin);
   try {
+    if (!allowedLocalHost(req.headers.host, port)) return response(res, 403, { error: 'Untrusted Host' });
     if (req.method === 'GET' && url.pathname === '/') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
       res.end(await readFile(new URL('../public/index.html', import.meta.url)));
