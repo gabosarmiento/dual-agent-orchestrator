@@ -65,3 +65,34 @@ test('managed session injects role-local CLI variables without credentials', asy
   assert.ok(args.some(a => a.startsWith('CLAUDE_CONFIG_DIR=')));
   assert.equal(args.some(a => a.includes('SECRET')),false);
 });
+
+test('inherited GH_TOKEN/GITHUB_TOKEN cannot override managed identities or sessions', async () => {
+  const storage = await mkdtemp(join(tmpdir(), 'dao-token-'));
+  const { tmux, calls } = fixture();
+  const original = { GH_TOKEN: process.env.GH_TOKEN, GITHUB_TOKEN: process.env.GITHUB_TOKEN };
+  process.env.GH_TOKEN = 'ghp_inherited_token';
+  process.env.GITHUB_TOKEN = 'ghp_inherited_fallback';
+  try {
+    const exec = async (command, args, options = {}) => {
+      if (command === 'gh') {
+        assert.equal(options.env.GH_TOKEN, undefined);
+        assert.equal(options.env.GITHUB_TOKEN, undefined);
+        return { stdout: options.env.GH_CONFIG_DIR.includes('/builder/') ? 'gabosarmiento\n' : 'agentgabo\n' };
+      }
+      return { stdout: 'ok\n' };
+    };
+    const setup = new Onboarding({ storage, tmux, exec });
+    const accounts = await setup.verifyUniqueGithub();
+    assert.equal(accounts.builder.github.login, 'gabosarmiento');
+    assert.equal(accounts.reviewer.github.login, 'agentgabo');
+    await setup.createSession({ state: { repo: '/tmp/repo' }, bind: async () => ({}) }, 'builder');
+    const args = calls.find(c => c.kind === 'command').args;
+    assert.ok(args.includes('GH_TOKEN='));
+    assert.ok(args.includes('GITHUB_TOKEN='));
+  } finally {
+    for (const [key, value] of Object.entries(original)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
