@@ -1,48 +1,42 @@
-# Dual Agent Workspace
+# Dual Agent Orchestrator — integrated onboarding prototype
 
-**Phase 2: persistent shared-session prototype (draft; real Mac integration not yet verified).**
+**Phase 3 draft:** The application now guides setup of its own managed Claude, Codex and GitHub sessions directly from the web dashboard. The agents remain available in native macOS Terminal via tmux. This is an early local prototype, **not a production-ready account manager**.
 
-Claude and Codex remain interactive and independent. Use both from the local browser **and** from native terminal windows, against the same persistent tmux sessions. Browser refresh and Node server restart do not stop the agents.
+## Start
 
-[Reference architecture](docs/ARCHITECTURE.md) · [Phase 1 prototype](https://github.com/gabosarmiento/dual-agent-orchestrator/tree/feat/local-mvp)
-
-## Quick start (macOS)
-
-Requirements: Node.js >=20, Git, tmux (`brew install tmux`), installed Claude Code and Codex CLI. Authenticate **in your own terminal** via official supported login flows. The application does not manage AI credentials or GitHub account identities.
+Requires Node.js >=20, npm and Homebrew installed on macOS. (Homebrew is needed only to install missing tmux/gh through the app.) This version does not install itself or install Homebrew/Node.
 
 ```sh
 git clone https://github.com/gabosarmiento/dual-agent-orchestrator.git
 cd dual-agent-orchestrator
-git switch feat/persistent-workspace
+git switch feat/in-app-onboarding
 npm test
 npm run check
 AGENT_WORKSPACE="$HOME/Desktop" npm start
 ```
 
-Open http://127.0.0.1:4317. `AGENT_WORKSPACE` is an existing directory containing the Git repository that you want to open, not a GitHub URL. For instance, `~/Desktop/kiff-cloud` is selectable when `AGENT_WORKSPACE="$HOME/Desktop"`.
+Open http://127.0.0.1:4317. Choose the local Git repository that you want to use under `AGENT_WORKSPACE`, e.g. `~/Desktop/kiff-cloud`. If the repo is elsewhere, restart the server with `AGENT_WORKSPACE` set to its parent folder. **No agent/GitHub environment-variable setup is required in your terminal.**
 
-**Use tmux when launching your existing agents:**
+## In-app onboarding
 
-```sh
-tmux new-session -s kiff-claude -c "$HOME/Desktop/kiff-cloud"
-# Now run your usual "claude" command inside this tmux pane.
-# In another terminal:
-tmux new-session -s kiff-codex -c "$HOME/Desktop/kiff-cloud"
-# Now run your usual "codex" command inside this pane.
-```
+1. The dashboard checks for tmux, Claude Code, Codex, GitHub CLI and Git. When tmux, Claude, Codex, or GitHub CLI is missing, it offers an explicit **Install** button for an allowlisted Homebrew/npm command. Existing installs are left alone. Installation may require system prerequisites or a user-managed npm/Homebrew fix; no invisible `sudo` or password collection.
+2. Click **Open project**, then **Create isolated session** once for each agent. The app creates separate persistent tmux shell sessions and separate local CLI authentication directories per role under `~/.dual-agent-orchestrator/credentials`.
+3. For each role click **Connect Claude/Connect Codex** and **Connect GitHub A/Connect GitHub B**. The app starts each official CLI login flow inside the relevant session. Follow the provider's browser/device-code/interactive prompts shown in that terminal pane. Login remains with the provider's CLI; the dashboard never receives a password or OAuth token.
+4. Click **Refresh connections**, then **Verify separate GitHub identities**. It calls `gh api user --jq .login` independently under each role's configuration to compare usernames. Click **Launch Claude** and **Launch Codex** to start the respective CLI in its persistent session.
+5. Continue working in the dashboard or your native terminal via `tmux attach -t <session>` (the dashboard shows the exact attach command). Browser and Terminal see the same ongoing process. An existing externally created tmux session can be mirrored and used for manual handoffs, but **managed login/launch requires an app-created session** to avoid silently inheriting shared credentials.
 
-On the dashboard, choose the repository and attach the two different tmux panes under Builder and Reviewer. Continue using either terminal normally: the dashboard reads the same panes and can also send prompts into them. To reconnect later, use `tmux attach -t kiff-claude` and `tmux attach -t kiff-codex` in separate native terminals. **If your CLI sessions were started outside tmux, they cannot be retroactively adopted**; start them inside tmux and use supported CLI resume functionality where available. The dashboard's "New tmux session" creates an interactive shell; type `claude` or `codex` to start the relevant agent.
+The application does not change global `gh auth switch` or rewrite your system's Git credentials. Managed GitHub CLI sessions have separate `GH_CONFIG_DIR` directories, but authenticated `git push` and `git fetch` **are not isolated/enforced yet**; Git may use a shared credential helper. Do not assume independent remote Git identities are operational based on login alone.
 
-Set a shared task, inspect the real terminal output and Git working tree, and send explicit handoff prompts to the other agent. Handoff uses the repository's initial and current HEAD as context. It never creates commits, pushes, changes credentials, or merges PRs. A handoff **does inject an instruction into that agent's interactive terminal**, so ensure it is ready for a new prompt first.
+## Working together
 
-## What is and isn't implemented
+Set shared task instructions. You can type to either CLI from the web dashboard, monitor the two active panes, and explicitly send a review handoff to Codex or a correction handoff to Claude. Keep both agents open and reconnect later from Terminal or the browser.
 
-Implemented: persistent tmux-backed sessions, live browser mirroring (polling), interactive text input, browser ↔ terminal continuity, shared task, session discovery/binding, Git HEAD/status, explicit Claude→Codex and Codex→Claude handoffs, persisted session mappings and notes, loopback-only server and same-origin write checks.
+**Still not implemented:** automatic completion detection and handoffs, isolated verified Git push and PR review account adapters, true PTY/xterm support, automated model selection, AI provider OAuth via a custom app callback, automatic session restoration from agents launched outside tmux, and local end-to-end Mac validation. Guided sign-in takes place inside the official interactive CLIs; the app cannot silently authenticate your accounts.
 
-Not implemented: protocol-level agent idle/turn-completion detection, **fully automated** handoffs, two independent verified GitHub identity integrations, automatic PR creation/review/merge, cross-worktree isolation, true xterm.js PTY emulation (dashboard mirrors captured text rather than a complete terminal). When both agents share a working tree, avoid simultaneous writes and review a committed snapshot for reliable findings. Neither Opus 5.5 nor GPT-6 Sol availability is verified; choose models in your local agent CLI. Existing Phase 1 orchestration code remains in the branch for reference but is not wired into the new server.
+The web server is a localhost-only terminal-control interface. Do not expose it on the Internet. Account credentials are written by each provider's CLI on your computer, not committed to the repository. This GitHub repository is currently public.
 
-**Security:** the browser is a local trusted interactive terminal remote control, not a multiuser or Internet-facing service. Do not expose port 4317 or place it behind a public proxy. Anyone with access to your unlocked Mac/browser could send text to your agent. The app never requests or stores login tokens; session output may contain sensitive information and should not be shared. Never connect a pane you do not intend the app to control.
+## Development
 
-## Validation
+`npm test` runs process/orchestration, tmux/workspace and setup unit tests. `npm run check` performs syntax checks. GitHub Actions is configured for this feature branch. A passing CI run establishes only the automated checks, not authenticated integration on your Mac.
 
-`npm test` covers tmux argument handling, persistent workspace handoff, unit-level orchestration and subprocess checks. GitHub Actions is configured for tests and syntax checking. Integration with *your* interactive tmux + Claude + Codex installation remains unverified until you run it locally. The repository is currently public; avoid committing secrets or private project details.
+[Architecture and design limitations](docs/ARCHITECTURE.md)
