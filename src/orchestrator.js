@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile, readFile } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { run, sanitized } from './process.js';
 import { resolveRepo, prepare, commitBuilder, diffSummary } from './git.js';
@@ -13,8 +13,9 @@ export function nextStage(current, review) {
 }
 export function parseReview(text) {
   // Require a dedicated final marker; never infer PASS from incidental prose.
-  const markers = [...text.matchAll(/^FINAL_VERDICT:\s*(PASS|CHANGES_REQUIRED)\s*$/gm)];
-  return markers.length === 1 ? markers[0][1] : 'CHANGES_REQUIRED';
+  const markers = [...text.matchAll(/^FINAL_VERDICT:[ \t]*(PASS|CHANGES_REQUIRED)[ \t]*$/gm)];
+  return markers.length === 1 && text.slice(markers[0].index + markers[0][0].length).trim() === ''
+    ? markers[0][1] : 'CHANGES_REQUIRED';
 }
 export class Orchestrator {
   constructor({ workspace, storage, cli = run }) {
@@ -23,6 +24,7 @@ export class Orchestrator {
     this.cli = cli;
     this.tasks = new Map();
     this.listeners = new Set();
+    this.writes = new Map();
   }
   subscribe(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   emit(task, event, payload = {}) {
@@ -30,17 +32,33 @@ export class Orchestrator {
     task.events.push(entry);
     if (task.events.length > 400) task.events.shift();
     for (const listener of this.listeners) listener(entry);
-    this.save(task).catch(() => {});
+    // Serialized, atomic snapshots; explicit terminal stages await the queue.
+    this.save(task).catch(error => { task.persistenceError = error.message; });
   }
-  stage(task, stage) {
+  async stage(task, stage) {
     if (!STATES.includes(stage)) throw new Error('Invalid stage');
     task.stage = stage;
     this.emit(task, 'stage', { stage });
+    await this.writes.get(task.id);
   }
-  async save(task) {
-    await mkdir(this.storage, { recursive: true });
+  save(task) {
     const { controller, ...safe } = task;
-    await writeFile(join(this.storage, task.id + '.json'), JSON.stringify(safe, null, 2), { mode: 0o600 });
+    const snapshot = JSON.stringify(safe, null, 2);
+    const previous = this.writes.get(task.id) || Promise.resolve();
+    const next = previous.catch(() => {}).then(async () => {
+      await mkdir(this.storage, { recursive: true, mode: 0o700 });
+      const path = join(this.storage, task.id + '.json');
+      const temp = path + '.' + randomUUID() + '.tmp';
+      try {
+        await writeFile(temp, snapshot, { mode: 0o600 });
+        await rename(temp, path);
+      } catch (error) {
+        await unlink(temp).catch(() => {});
+        throw error;
+      }
+    });
+    this.writes.set(task.id, next);
+    return next;
   }
   async load() {
     await mkdir(this.storage, { recursive: true });
@@ -61,6 +79,7 @@ export class Orchestrator {
     const task = { id: randomUUID(), repo: path, prompt, maxIterations, stage: 'queued', events: [], results: [], createdAt: new Date().toISOString(), controller: new AbortController() };
     this.tasks.set(task.id, task);
     this.emit(task, 'created');
+    await this.writes.get(task.id);
     void this.execute(task);
     return { id: task.id };
   }
@@ -74,7 +93,7 @@ export class Orchestrator {
   }
   async execute(task) {
     try {
-      this.stage(task, 'preparing');
+      await this.stage(task, 'preparing');
       const work = await prepare(task.repo, task.id, join(this.storage, 'worktrees'));
       task.work = work;
       for (let attempt = 1; attempt <= task.maxIterations; attempt++) {
@@ -115,9 +134,11 @@ export class Orchestrator {
       }
       this.stage(task, 'blocked');
       this.emit(task, 'notice', { message: 'Maximum review attempts reached; manual intervention required.' });
+      await this.writes.get(task.id);
     } catch (error) {
       this.stage(task, task.controller?.signal.aborted ? 'stopped' : 'failed');
       this.emit(task, 'error', { message: sanitized(error.message) });
+      await this.writes.get(task.id).catch(() => {});
     }
   }
   async stop(id) {
