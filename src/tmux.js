@@ -1,7 +1,7 @@
 import { run } from './process.js';
 
 const NAME = /^[A-Za-z0-9_-]{1,64}$/;
-const TARGET = /^[A-Za-z0-9_.:-]{1,96}$/;
+const TARGET = /^(?:%[0-9]{1,10}|[A-Za-z0-9_][A-Za-z0-9_.:-]{0,95})$/;
 export function validSession(name) {
   if (!NAME.test(name)) throw new Error('Invalid session name (letters, numbers, _, - only)');
   return name;
