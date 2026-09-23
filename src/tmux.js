@@ -11,8 +11,8 @@ export function validTarget(target) {
   return target;
 }
 export function sanitizeTerminalInput(value) {
-  if (typeof value !== 'string' || !value || value.length > 6000 || /[\x00-\x1f\x7f]/.test(value)) {
-    throw new Error('Input must be 1–6000 printable characters (newlines are not supported)');
+  if (typeof value !== 'string' || !value || value.length > 20000 || /[\x00-\x1f\x7f]/.test(value)) {
+    throw new Error('Input must be 1–20000 printable characters (newlines are not supported)');
   }
   return value;
 }
