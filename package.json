@@ -1,0 +1,14 @@
+{
+  "name": "dual-agent-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js",
+    "check": "node --check src/server.js && node --check src/orchestrator.js && node --check src/git.js && node --check src/process.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
