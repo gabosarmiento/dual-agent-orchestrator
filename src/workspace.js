@@ -103,7 +103,7 @@ export class Workspace {
       : ['Address the independent review findings for this task: ' + this.state.prompt,
         'Reviewer feedback:\n' + note,
         'Inspect the actual files and tests; commit changes when ready. Do not push or merge without approval.'].join('\n\n');
-    await this.tmux.type(this.state.roles[role], prompt, true);
+    await this.tmux.type(this.state.roles[role], prompt.replace(/\s*\n+\s*/g, ' | '), true);
     const handoff = { to: role, sha, note, at: new Date().toISOString() };
     this.state.handoffs.push(handoff);
     this.state.handoffs = this.state.handoffs.slice(-50);
