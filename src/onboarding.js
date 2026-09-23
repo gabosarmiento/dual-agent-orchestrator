@@ -1,5 +1,6 @@
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { homedir, userInfo } from 'node:os';
 import { run } from './process.js';
 
 const ROLES = ['builder', 'reviewer'];
@@ -64,10 +65,20 @@ export class Onboarding {
     // tmux starts a managed login shell with role-specific CLI configuration.
     // These sessions can be attached from macOS Terminal as normal.
     const name = 'dao-' + role + '-' + Date.now().toString(36);
-    const args = ['new-session', '-d', '-s', name, '-c', workspace.state.repo];
-    for (const [key, value] of Object.entries(env)) args.push('-e', key + '=' + value);
-    // A pre-existing token in the parent/tmux server must never override each role's gh login.
-    args.push('-e', 'GH_TOKEN=', '-e', 'GITHUB_TOKEN=');
+    // The shell itself must be isolated, not just the tmux server environment:
+    // user startup files may re-export GH_TOKEN after tmux -e has cleared it.
+    // A fresh bash without profile/rc files and an explicit empty environment
+    // prevents inherited tokens or user shell startup files from overriding gh.
+    const minimal = {
+      HOME: homedir(),
+      USER: userInfo().username,
+      PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
+      TERM: 'xterm-256color',
+      ...env
+    };
+    const args = ['new-session', '-d', '-s', name, '-c', workspace.state.repo,
+      'env', '-i', ...Object.entries(minimal).map(([key, value]) => key + '=' + value),
+      '/bin/bash', '--noprofile', '--norc', '-i'];
     await this.tmux.command(args);
     return workspace.bind(role, name);
   }
@@ -77,7 +88,6 @@ export class Onboarding {
       throw Error('AI provider does not match selected role');
     }
     if (!workspace.state.roles[role]) throw Error('Create or attach a session for this role first');
-    const env = await this.env(role);
     const command = provider === 'github' ? 'gh auth login --hostname github.com --git-protocol https --web'
       : provider === 'claude' ? 'claude auth login' : 'codex login';
     // Never paste credentials into the application. The official CLI handles auth.
