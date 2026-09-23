@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { nextStage, parseReview, Orchestrator } from '../src/orchestrator.js';
@@ -64,4 +64,30 @@ test('concurrent task saves retain newest complete atomic snapshot', async () =>
   const final = new Orchestrator({workspace: root, storage: join(root, 'state')});
   await final.load();
   assert.equal(final.list()[0].stage, 'verified');
+});
+
+test('successful execute awaits durable verified state before completion', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dual-execute-test-'));
+  const repo = join(root, 'project');
+  await mkdir(repo);
+  await run('git', ['init', repo]);
+  await writeFile(join(repo, 'README.md'), 'initial\n');
+  await run('git', ['add', '.'], { cwd: repo });
+  await run('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'initial'], { cwd: repo });
+  const cli = async (command, args, opts) => {
+    if (command === 'claude') {
+      await writeFile(join(opts.cwd, 'feature.txt'), 'implementation\n');
+      return { stdout: 'Implemented and tested' };
+    }
+    if (command === 'codex') return { stdout: 'Reviewed committed feature.\nFINAL_VERDICT: PASS\n' };
+    throw Error('Unexpected CLI: ' + command);
+  };
+  const storage = join(root, 'state');
+  const app = new Orchestrator({ workspace: root, storage, cli });
+  const { id } = await app.start({repo, prompt: 'Implement feature and verify'});
+  await app.tasks.get(id).completion;
+  const restored = new Orchestrator({ workspace: root, storage });
+  await restored.load();
+  assert.equal(restored.tasks.get(id).stage, 'verified');
+  assert.equal(restored.tasks.get(id).results[0].outcome, 'PASS');
 });
