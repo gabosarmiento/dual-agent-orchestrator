@@ -42,7 +42,7 @@ export class Orchestrator {
     await this.writes.get(task.id);
   }
   save(task) {
-    const { controller, ...safe } = task;
+    const { controller, completion, ...safe } = task;
     const snapshot = JSON.stringify(safe, null, 2);
     const previous = this.writes.get(task.id) || Promise.resolve();
     const next = previous.catch(() => {}).then(async () => {
@@ -80,7 +80,7 @@ export class Orchestrator {
     this.tasks.set(task.id, task);
     this.emit(task, 'created');
     await this.writes.get(task.id);
-    void this.execute(task);
+    task.completion = this.execute(task);
     return { id: task.id };
   }
   async agent(task, name, command, args, cwd, env = {}) {
