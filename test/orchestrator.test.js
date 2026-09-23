@@ -1,0 +1,93 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { nextStage, parseReview, Orchestrator } from '../src/orchestrator.js';
+import { assertWorkspace } from '../src/git.js';
+import { sanitized, run } from '../src/process.js';
+
+test('review is accepted only with one explicit verdict marker', () => {
+  assert.equal(parseReview('Findings: none\nFINAL_VERDICT: PASS\n'), 'PASS');
+  assert.equal(parseReview('I think PASS'), 'CHANGES_REQUIRED');
+  assert.equal(parseReview('FINAL_VERDICT: PASS\nFINAL_VERDICT: CHANGES_REQUIRED'), 'CHANGES_REQUIRED');
+  assert.equal(parseReview('FINAL_VERDICT: CHANGES_REQUIRED'), 'CHANGES_REQUIRED');
+  assert.equal(parseReview('FINAL_VERDICT: PASS\nActionable issue: loses data\n'), 'CHANGES_REQUIRED');
+  assert.equal(parseReview('FINAL_VERDICT: PASS\n \t'), 'PASS');
+});
+test('stage transitions are explicit', () => {
+  assert.equal(nextStage('reviewing', 'PASS'), 'verified');
+  assert.equal(nextStage('reviewing', 'CHANGES_REQUIRED'), 'fixing');
+  assert.throws(() => nextStage('coding', 'PASS'));
+});
+test('workspace check blocks repository traversal', () => {
+  assert.equal(assertWorkspace('/code', '/code/project'), '/code/project');
+  assert.throws(() => assertWorkspace('/code', '/tmp/project'));
+  assert.throws(() => assertWorkspace('/code', '/code'));
+  assert.throws(() => assertWorkspace('/code', '/code/../private'));
+});
+test('safe logs redact known token formats', () => {
+  assert.equal(sanitized('Authorization ghp_abcdefghijklmno'), 'Authorization [REDACTED]');
+});
+test('process runner captures output and handles nonzero status', async () => {
+  const output = await run(process.execPath, ['-e', 'process.stdout.write("ok")']);
+  assert.equal(output.stdout, 'ok');
+  await assert.rejects(run(process.execPath, ['-e', 'process.exit(3)']), /exited 3/);
+});
+test('persist and load completed task snapshots', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dual-agent-test-'));
+  const storage = join(root, 'state');
+  await mkdir(storage);
+  const app = new Orchestrator({ workspace: root, storage });
+  const task = { id: '12345678-1234-1234-1234-123456789abc', repo: root, stage: 'verified', events: [], results: [], controller: new AbortController() };
+  app.tasks.set(task.id, task);
+  await app.save(task);
+  const restarted = new Orchestrator({ workspace: root, storage });
+  await restarted.load();
+  assert.equal(restarted.list()[0].stage, 'verified');
+});
+
+test('concurrent task saves retain newest complete atomic snapshot', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dual-agent-atomic-'));
+  const app = new Orchestrator({ workspace: root, storage: join(root, 'state') });
+  const task = { id: '12345678-1234-1234-1234-123456789abc', repo: root, stage: 'queued', events: [], results: [] };
+  const writes = [];
+  for (let n = 0; n < 60; n++) {
+    task.stage = 'step-' + n;
+    writes.push(app.save(task));
+  }
+  await Promise.all(writes);
+  const restored = new Orchestrator({workspace: root, storage: join(root, 'state')});
+  await restored.load();
+  assert.equal(restored.list()[0].stage, 'step-59');
+  await app.stage(task, 'verified');
+  const final = new Orchestrator({workspace: root, storage: join(root, 'state')});
+  await final.load();
+  assert.equal(final.list()[0].stage, 'verified');
+});
+
+test('successful execute awaits durable verified state before completion', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dual-execute-test-'));
+  const repo = join(root, 'project');
+  await mkdir(repo);
+  await run('git', ['init', repo]);
+  await writeFile(join(repo, 'README.md'), 'initial\n');
+  await run('git', ['add', '.'], { cwd: repo });
+  await run('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'initial'], { cwd: repo });
+  const cli = async (command, args, opts) => {
+    if (command === 'claude') {
+      await writeFile(join(opts.cwd, 'feature.txt'), 'implementation\n');
+      return { stdout: 'Implemented and tested' };
+    }
+    if (command === 'codex') return { stdout: 'Reviewed committed feature.\nFINAL_VERDICT: PASS\n' };
+    throw Error('Unexpected CLI: ' + command);
+  };
+  const storage = join(root, 'state');
+  const app = new Orchestrator({ workspace: root, storage, cli });
+  const { id } = await app.start({repo, prompt: 'Implement feature and verify'});
+  await app.tasks.get(id).completion;
+  const restored = new Orchestrator({ workspace: root, storage });
+  await restored.load();
+  assert.equal(restored.tasks.get(id).stage, 'verified');
+  assert.equal(restored.tasks.get(id).results[0].outcome, 'PASS');
+});

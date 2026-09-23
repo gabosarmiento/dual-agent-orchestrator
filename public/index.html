@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dual Agent Orchestrator</title>
+<style>
+:root{font-family:system-ui,-apple-system,sans-serif;color-scheme:dark;background:#10131b;color:#edf0f7}
+*{box-sizing:border-box}body{max-width:1220px;margin:auto;padding:28px}header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+h1{font-size:1.6rem}h2{font-size:1.1rem}small,.muted{color:#aab4c8}section,.panel{border:1px solid #353d52;background:#1b2230;border-radius:14px;padding:18px;margin:14px 0}
+input,textarea,button,select{font:inherit;border-radius:7px;padding:10px;background:#101722;color:#fff;border:1px solid #485471}
+input,textarea{width:100%}textarea{min-height:100px;resize:vertical}label{display:block;margin:12px 0 6px}
+button{cursor:pointer;background:#4765de;border-color:#4765de}button:disabled{opacity:.5;cursor:default}button.secondary{background:#273247;border-color:#485471}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:1px solid #485471;border-radius:20px;padding:5px 11px;font-size:.82rem}.ok{color:#92e1b2}.bad{color:#ffacac}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.8rem;line-height:1.4;max-height:330px;overflow:auto;background:#0c1018;padding:12px;border-radius:7px}
+.card{border-top:1px solid #485471;padding:14px 0}.card:first-child{border:0}.controls{display:flex;gap:10px;margin-top:14px}
+@media(max-width:760px){.grid{grid-template-columns:1fr}body{padding:12px}}
+</style>
+</head>
+<body>
+<header><div><h1>Dual Agent Orchestrator</h1><small>Local-first development · Claude builds · Codex verifies</small></div><span class="chip" id="connection">Connecting…</span></header>
+<section><h2>Connections</h2><div class="chips" id="connections">Checking local CLI sessions…</div>
+<p class="muted">GitHub A and B status is informational in this phase. GitHub push, PR creation and PR review are not implemented; local commits are not attributed to authenticated GitHub accounts.</p></section>
+<section><h2>New task</h2><form id="task-form">
+<label for="repo">Absolute path to repository (must be inside allowed workspace)</label><input id="repo" required placeholder="/Users/you/code/my-project">
+<label for="prompt">What should Claude implement?</label><textarea id="prompt" required minlength="4" maxlength="12000" placeholder="Implement a focused change and add tests…"></textarea>
+<label for="iterations">Maximum review attempts</label><select id="iterations"><option value="1">1</option><option selected value="2">2</option><option value="3">3</option></select>
+<div class="controls"><button type="submit">Start local workflow</button><span class="muted" id="feedback"></span></div></form></section>
+<section><h2>Tasks</h2><p class="muted" id="workspace"></p><div id="tasks">No tasks yet.</div></section>
+<section><h2>Live activity</h2><div class="grid">
+<div class="panel"><h2>Claude · Builder</h2><pre id="builder">Awaiting a task…</pre></div>
+<div class="panel"><h2>Codex · Reviewer</h2><pre id="reviewer">Awaiting a task…</pre></div>
+</div><small>Process output is streamed from local CLIs. Select a task to view its output.</small></section>
+<script>
+const $ = id => document.getElementById(id);
+let selected = null, tasks = [], lastEvents = new Map();
+const escapeHtml = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function json(url, options){const res=await fetch(url,options);const data=await res.json();if(!res.ok)throw Error(data.error||res.status);return data}
+function renderOutput(){
+const task=tasks.find(t=>t.id===selected);if(!task)return;
+for(const agent of ['builder','reviewer']){
+const output=task.events.filter(e=>e.event==='output'&&e.agent===agent).map(e=>e.message).join('');
+$(agent).textContent=output.slice(-18000)||'No output yet.';
+$(agent).scrollTop=$(agent).scrollHeight;
+}}
+function renderTasks(){
+$('tasks').replaceChildren();
+if(!tasks.length){$('tasks').textContent='No tasks yet.';return}
+for(const t of tasks.slice().reverse()){
+const node=document.createElement('div');node.className='card';
+const title=document.createElement('div');title.textContent=t.prompt.slice(0,120);
+const subtitle=document.createElement('small');subtitle.textContent=t.stage.toUpperCase()+' · '+t.repo+' · '+t.id.slice(0,8);
+node.append(title,subtitle);
+const controls=document.createElement('div');controls.className='controls';
+const view=document.createElement('button');view.className='secondary';view.textContent=selected===t.id?'Viewing':'View activity';
+view.onclick=()=>{selected=t.id;renderTasks();renderOutput()};
+controls.append(view);
+if(['queued','preparing','coding','reviewing','fixing'].includes(t.stage)){
+const stop=document.createElement('button');stop.textContent='Stop';stop.onclick=async()=>{if(!confirm('Stop running agents? Worktrees will be preserved.'))return;try{await json('/api/tasks/'+t.id+'/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})}catch(e){alert(e.message)}};
+controls.append(stop);
+}
+node.append(controls);
+if(t.results.length){
+const result=document.createElement('small');result.textContent='Latest review: '+t.results.at(-1).outcome+' · commit '+t.results.at(-1).commit.sha.slice(0,12);node.append(result);
+}
+const error=t.events.filter(e=>e.event==='error').at(-1);if(error){const p=document.createElement('p');p.className='bad';p.textContent=error.message;node.append(p)}
+$('tasks').append(node);
+}
+}
+async function refresh(){try{
+const data=await json('/api/tasks');tasks=data.tasks;$('workspace').textContent='Allowed workspace: '+data.workspace;
+if(!selected&&tasks.length)selected=tasks.at(-1).id;
+renderTasks();renderOutput();$('connection').textContent='Local server connected';
+}catch(e){$('connection').textContent='Disconnected: '+e.message}}
+async function status(){try{const result=await json('/api/status');$('connections').replaceChildren();
+for(const [name,item] of Object.entries(result)){if(name==='githubPublishing')continue;const chip=document.createElement('span');chip.className='chip '+(item.available?'ok':'bad');chip.title=item.details;chip.textContent=name+': '+(item.available?'available':'unavailable');$('connections').append(chip)}
+}catch(e){$('connections').textContent=e.message}}
+$('task-form').onsubmit=async e=>{e.preventDefault();$('feedback').textContent='Starting…';try{
+const task=await json('/api/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({repo:$('repo').value,prompt:$('prompt').value,maxIterations:Number($('iterations').value)})});
+selected=task.id;$('feedback').textContent='Task '+task.id.slice(0,8)+' started';await refresh();
+}catch(error){$('feedback').textContent=error.message}};
+const feed=new EventSource('/api/events');
+feed.onmessage=async e=>{const event=JSON.parse(e.data);if(event.event==='output'){
+const t=tasks.find(t=>t.id===event.taskId);
+if(t){t.events.push(event);if(t.events.length>400)t.events.shift();if(selected===t.id)renderOutput()}
+}else await refresh()};
+feed.onerror=()=>{$('connection').textContent='Live stream disconnected; reconnecting…'};
+refresh();status();
+</script>
+</body></html>
