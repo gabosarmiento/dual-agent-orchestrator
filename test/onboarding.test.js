@@ -61,8 +61,11 @@ test('managed session injects role-local CLI variables without credentials', asy
   assert.equal(created.role,'builder');
   const args = calls[0].args;
   assert.equal(args[0], 'new-session');
-  assert.ok(args.some(a => a.startsWith('GH_CONFIG_DIR=')));
-  assert.ok(args.some(a => a.startsWith('CLAUDE_CONFIG_DIR=')));
+  assert.match(args.at(-1), /GH_CONFIG_DIR=/);
+  assert.match(args.at(-1), /CLAUDE_CONFIG_DIR=/);
+  assert.match(args.at(-1), /'env' '-i'/);
+  assert.match(args.at(-1), /'\/bin\/bash' '--noprofile' '--norc' '-i'/);
+  assert.doesNotMatch(args.at(-1), /GH_TOKEN=|GITHUB_TOKEN=/);
   assert.equal(args.some(a => a.includes('SECRET')),false);
 });
 
@@ -87,12 +90,28 @@ test('inherited GH_TOKEN/GITHUB_TOKEN cannot override managed identities or sess
     assert.equal(accounts.reviewer.github.login, 'agentgabo');
     await setup.createSession({ state: { repo: '/tmp/repo' }, bind: async () => ({}) }, 'builder');
     const args = calls.find(c => c.kind === 'command').args;
-    assert.ok(args.includes('GH_TOKEN='));
-    assert.ok(args.includes('GITHUB_TOKEN='));
+    const bootstrap = args.at(-1);
+    assert.match(bootstrap, /'env' '-i'/);
+    assert.match(bootstrap, /'\/bin\/bash' '--noprofile' '--norc' '-i'/);
+    assert.doesNotMatch(bootstrap, /ghp_inherited_token|ghp_inherited_fallback|GH_TOKEN=|GITHUB_TOKEN=/);
   } finally {
     for (const [key, value] of Object.entries(original)) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
   }
+});
+
+test('managed shell bootstrap prevents startup token overrides and quotes its paths', async () => {
+  const storage = await mkdtemp(join(tmpdir(), 'dao-path-with-space-'));
+  const { tmux, calls } = fixture();
+  const setup = new Onboarding({ storage, tmux });
+  await setup.createSession({ state: { repo: '/tmp/project' }, bind: async () => ({}) }, 'reviewer');
+  const args = calls.find(c => c.kind === 'command').args;
+  assert.equal(args[0], 'new-session');
+  assert.equal(args.length, 8);
+  assert.match(args.at(-1), /'CODEX_HOME=/);
+  assert.match(args.at(-1), /'GH_CONFIG_DIR=/);
+  assert.match(args.at(-1), /'env' '-i'/);
+  assert.match(args.at(-1), /'\/bin\/bash' '--noprofile' '--norc' '-i'/);
 });
