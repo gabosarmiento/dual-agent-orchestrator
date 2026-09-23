@@ -109,7 +109,7 @@ test('managed shell bootstrap prevents startup token overrides and quotes its pa
   await setup.createSession({ state: { repo: '/tmp/project' }, bind: async () => ({}) }, 'reviewer');
   const args = calls.find(c => c.kind === 'command').args;
   assert.equal(args[0], 'new-session');
-  assert.equal(args.length, 8);
+  assert.equal(args.length, 7);
   assert.match(args.at(-1), /'CODEX_HOME=/);
   assert.match(args.at(-1), /'GH_CONFIG_DIR=/);
   assert.match(args.at(-1), /'env' '-i'/);
