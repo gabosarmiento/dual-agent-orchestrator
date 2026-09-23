@@ -4,6 +4,7 @@ import { run } from './process.js';
 
 const ROLES = ['builder', 'reviewer'];
 const PROVIDERS = ['claude', 'codex', 'github'];
+const SHELLS = new Set(['bash', 'zsh', 'fish', 'sh', 'dash', 'ksh']);
 const toolFor = { builder: 'claude', reviewer: 'codex' };
 const checkRole = role => { if (!ROLES.includes(role)) throw Error('Unknown role'); return role; };
 const checkProvider = provider => { if (!PROVIDERS.includes(provider)) throw Error('Unknown provider'); return provider; };
@@ -83,6 +84,7 @@ export class Onboarding {
     if (!metadata?.session?.startsWith('dao-' + role + '-')) {
       throw Error('Account setup requires an app-created isolated session; existing external sessions are view-only for login');
     }
+    if (!SHELLS.has(metadata.command)) throw Error('Return this session to its shell before starting a login flow; the agent is currently running');
     await this.tmux.type(pane, command, true);
     return { launched: true, provider, role, next: 'Follow the official CLI/browser sign-in prompt in the session, then press Refresh connections.' };
   }
@@ -91,6 +93,7 @@ export class Onboarding {
     const pane = workspace.state.roles[role];
     const metadata = (await this.tmux.sessions()).find(p => p.pane === pane);
     if (!metadata?.session?.startsWith('dao-' + role + '-')) throw Error('Use an app-created isolated session for managed agent launch');
+    if (!SHELLS.has(metadata.command)) throw Error('Agent appears to be running already; reconnect rather than starting a duplicate');
     const identities = await this.identities();
     if (!identities[role].ai.connected) throw Error('Connect the AI provider for this role first');
     await this.tmux.type(pane, toolFor[role], true);
