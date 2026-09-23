@@ -2,7 +2,7 @@ import { realpath, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { run } from './process.js';
 import { Tmux } from './tmux.js';
-import { resolveRepo } from './git.js';
+import { assertWorkspace } from './git.js';
 
 const ROLES = ['builder', 'reviewer'];
 export class Workspace {
@@ -30,7 +30,10 @@ export class Workspace {
     // Never automatically inject text into terminals after a server restart.
   }
   async project(repo) {
-    const path = await resolveRepo(this.root, repo);
+    const root = await realpath(this.root);
+    const path = assertWorkspace(root, await realpath(repo));
+    const { stdout: top } = await this.exec('git', ['rev-parse', '--show-toplevel'], { cwd: path });
+    if (resolve(top.trim()) !== path) throw new Error('Select a repository root');
     this.state = { repo: path, prompt: '', roles: {}, head: '', handoffs: [], autoReview: false };
     await this.save(); this.event('workspace');
     return this.snapshot();
