@@ -97,7 +97,7 @@ export class Orchestrator {
       const work = await prepare(task.repo, task.id, join(this.storage, 'worktrees'));
       task.work = work;
       for (let attempt = 1; attempt <= task.maxIterations; attempt++) {
-        this.stage(task, attempt === 1 ? 'coding' : 'fixing');
+        await this.stage(task, attempt === 1 ? 'coding' : 'fixing');
         const previous = task.results.at(-1)?.review || '';
         const instruction = [
           'Implement the following task in this working directory. Edit only files in this repository.',
@@ -110,7 +110,7 @@ export class Orchestrator {
           ['-p', instruction, '--permission-mode', 'acceptEdits'], work.builder,
           process.env.CLAUDE_CONFIG_DIR ? { CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR } : {});
         const commit = await commitBuilder(work, attempt);
-        this.stage(task, 'reviewing');
+        await this.stage(task, 'reviewing');
         const reviewPrompt = [
           'You are an independent read-only reviewer. Review the committed changes in the CURRENT working tree against base commit ' + work.base + '.',
           'Original task:\n' + task.prompt,
@@ -128,15 +128,15 @@ export class Orchestrator {
         const stage = nextStage('reviewing', outcome);
         if (stage === 'verified') {
           task.diff = await diffSummary(work);
-          this.stage(task, stage);
+          await this.stage(task, stage);
           return;
         }
       }
-      this.stage(task, 'blocked');
+      await this.stage(task, 'blocked');
       this.emit(task, 'notice', { message: 'Maximum review attempts reached; manual intervention required.' });
       await this.writes.get(task.id);
     } catch (error) {
-      this.stage(task, task.controller?.signal.aborted ? 'stopped' : 'failed');
+      await this.stage(task, task.controller?.signal.aborted ? 'stopped' : 'failed');
       this.emit(task, 'error', { message: sanitized(error.message) });
       await this.writes.get(task.id).catch(() => {});
     }
