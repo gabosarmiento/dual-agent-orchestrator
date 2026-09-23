@@ -27,7 +27,7 @@ test('creates two independent credential locations under app state', async () =>
   assert.notEqual(a.GH_CONFIG_DIR, b.GH_CONFIG_DIR);
   assert.ok(a.CLAUDE_CONFIG_DIR);
   assert.ok(b.CODEX_HOME);
-  assert.throws(() => setup.env('admin'), /Unknown role/);
+  await assert.rejects(setup.env('admin'), /Unknown role/);
 });
 test('verifies both GitHub identities independently and rejects identical accounts', async () => {
   const storage = await mkdtemp(join(tmpdir(), 'dao-setup-'));
